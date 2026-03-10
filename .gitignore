@@ -1,0 +1,50 @@
+# 환경변수 / 시크릿
+.env
+.env.*
+!.env.example
+
+# Claude Code
+.claude/
+
+# 플러그인 상태
+.omc/state/
+.omc/project-memory.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Node.js
+node_modules/
+.next/
+dist/
+
+# 이미지/미디어
+*.png
+*.jpg
+*.jpeg
+*.gif
+
+# 데이터베이스
+*.db
+*.sqlite
+*.sqlite3
+
+# 로그
+logs/*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
