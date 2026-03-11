@@ -9,6 +9,7 @@
 # 플러그인 상태
 .omc/state/
 .omc/project-memory.json
+.omc/sessions/
 
 # Python
 __pycache__/
@@ -38,6 +39,7 @@ dist/
 
 # 로그
 logs/*.log
+logs/*.out
 
 # IDE
 .vscode/

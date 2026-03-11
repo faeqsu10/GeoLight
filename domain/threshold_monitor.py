@@ -4,7 +4,7 @@ import logging
 import time
 from typing import Optional
 
-from config import THRESHOLDS
+from config import INDICATOR_DISPLAY_NAMES, THRESHOLDS
 from storage.db import get_last_alert, insert_alert, insert_price_snapshot
 
 logger = logging.getLogger("geolight.domain.threshold")
@@ -56,14 +56,7 @@ def check_threshold(indicator: str, value: float, prev_value: float,
 
     # 임계치 돌파!
     direction = "급등" if change_pct > 0 else "급락"
-    indicator_names = {
-        "oil_wti": "WTI 유가",
-        "oil_brent": "브렌트 유가",
-        "usd_krw": "USD/KRW 환율",
-        "vix": "VIX 공포지수",
-        "kospi": "KOSPI",
-    }
-    name = indicator_names.get(indicator, indicator)
+    name = INDICATOR_DISPLAY_NAMES.get(indicator, indicator)
     message = (
         f"[임계치 돌파] {name} {direction}\n"
         f"현재: {value:,.2f} (전일 대비 {change_pct:+.2f}%)\n"

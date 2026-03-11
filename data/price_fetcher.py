@@ -5,17 +5,9 @@ import time
 from typing import Optional
 
 import yfinance as yf
+from config import INDICATORS
 
 logger = logging.getLogger("geolight.data.price")
-
-# Yahoo Finance 티커 매핑
-_TICKERS = {
-    "oil_wti": "CL=F",       # WTI 원유 선물
-    "oil_brent": "BZ=F",     # Brent 원유 선물
-    "usd_krw": "KRW=X",      # USD/KRW 환율
-    "vix": "^VIX",            # VIX 공포지수
-    "kospi": "^KS11",         # KOSPI 지수
-}
 
 # 캐시 (5분 TTL)
 _cache: dict[str, tuple[float, dict]] = {}
@@ -36,7 +28,8 @@ def fetch_price(indicator: str) -> Optional[dict]:
     if cached:
         return cached
 
-    ticker_symbol = _TICKERS.get(indicator)
+    indicator_config = INDICATORS.get(indicator)
+    ticker_symbol = indicator_config.get("ticker") if indicator_config else None
     if not ticker_symbol:
         logger.warning("알 수 없는 지표: %s", indicator)
         return None
@@ -71,7 +64,7 @@ def fetch_price(indicator: str) -> Optional[dict]:
 def fetch_all_prices() -> dict[str, dict]:
     """모든 지표의 가격을 한 번에 조회."""
     results = {}
-    for indicator in _TICKERS:
+    for indicator in INDICATORS:
         price = fetch_price(indicator)
         if price:
             results[indicator] = price

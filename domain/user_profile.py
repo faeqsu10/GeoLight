@@ -3,24 +3,12 @@
 import logging
 from typing import Optional
 
+from config import PROFILE_ALIASES, PROFILE_NAMES
 from storage.db import get_user_profile, save_user_profile
 
 logger = logging.getLogger("geolight.domain.profile")
 
-VALID_PROFILES = {"conservative", "neutral", "aggressive"}
-PROFILE_NAMES = {
-    "conservative": "보수",
-    "neutral": "중립",
-    "aggressive": "공격",
-}
-# 한글 입력 → 영문 매핑
-PROFILE_ALIASES = {
-    "보수": "conservative",
-    "보수적": "conservative",
-    "중립": "neutral",
-    "공격": "aggressive",
-    "공격적": "aggressive",
-}
+VALID_PROFILES = set(PROFILE_NAMES)
 
 
 def get_profile(telegram_user_id: int) -> dict:
@@ -100,36 +88,32 @@ def format_profile(profile: dict) -> str:
 
     lines = [
         "내 투자 설정",
-        "=" * 25,
-        "",
-        f"  투자 성향: {name}",
-        f"  월 투자 예산: {budget:,}원" if budget else "  월 투자 예산: 미설정",
+        f"투자 성향: {name}",
+        f"월 투자 예산: {budget:,}원" if budget else "월 투자 예산: 미설정",
     ]
 
     if income:
-        lines.append(f"  월 소득: {income:,}원")
-        lines.append(f"  고정 지출: {expenses:,}원" if expenses else "  고정 지출: 미설정")
+        lines.append(f"월 소득: {income:,}원")
+        lines.append(f"고정 지출: {expenses:,}원" if expenses else "고정 지출: 미설정")
         disposable = max(income - expenses, 0)
         if income > expenses:
-            lines.append(f"  가용 자금: {disposable:,}원")
+            lines.append(f"가용 자금: {disposable:,}원")
         else:
-            lines.append(f"  가용 자금: 0원 (지출이 소득 이상)")
+            lines.append("가용 자금: 0원 (지출이 소득 이상)")
 
     lines.extend([
         "",
-        "설정 방법",
+        "빠른 설정 예시",
         "-" * 25,
+        "/profile 공격 200만",
+        "/profile 소득 500만 지출 300만",
         "",
-        "성향 + 예산:",
-        "  /profile 공격 200만",
-        "",
-        "소득 + 지출 (자동 예산 계산):",
-        "  /profile 소득 500만 지출 300만",
-        "",
-        "개별 변경:",
-        "  /profile 보수",
-        "  /profile 200만",
-        "  /profile 소득 400만",
-        "  /profile 지출 250만",
+        "자주 쓰는 변경",
+        "-" * 25,
+        "/profile 보수",
+        "/profile 200만",
+        "/profile 소득 400만",
+        "/profile 지출 250만",
     ])
+
     return "\n".join(lines)

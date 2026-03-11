@@ -10,7 +10,12 @@ from telegram.ext import (
     ContextTypes,
 )
 
-from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_MAX_LENGTH
+from config import (
+    INDICATOR_DISPLAY_NAMES,
+    TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID,
+    TELEGRAM_MAX_LENGTH,
+)
 from data.news_collector import collect_all_news
 from data.price_fetcher import fetch_all_prices
 from domain.ai_assistant import AIAssistant, build_market_context, markdown_to_telegram_html
@@ -59,6 +64,36 @@ async def _send_message(chat_id: str, text: str, context: ContextTypes.DEFAULT_T
         await context.bot.send_message(chat_id=chat_id, text=chunk)
 
 
+def _format_sector_line(entries: list[dict]) -> str:
+    sectors = [entry.get("sector", "") for entry in entries if entry.get("sector")]
+    return ", ".join(sectors[:3]) if sectors else "없음"
+
+
+def _format_event_brief(mapping: dict, title: str = "") -> list[str]:
+    lines = [
+        f"[{mapping['event_type']}] 수혜: {_format_sector_line(mapping.get('beneficiary', []))} | "
+        f"피해: {_format_sector_line(mapping.get('damaged', []))}"
+    ]
+    if title:
+        lines.append(f"  뉴스: {title[:70]}")
+    return lines
+
+
+def _command_error_message(command: str, detail: str) -> str:
+    return (
+        f"{command} 결과를 지금 만들지 못했습니다.\n"
+        f"{detail}\n"
+        "잠시 뒤 다시 시도해 주세요."
+    )
+
+
+def _data_unavailable_message(subject: str, next_step: str) -> str:
+    return (
+        f"지금은 {subject}를 불러오지 못했습니다.\n"
+        f"{next_step}"
+    )
+
+
 async def send_alert(text: str):
     """외부에서 호출하는 알림 발송 (스케줄러용)."""
     if not _app or not TELEGRAM_CHAT_ID:
@@ -90,17 +125,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """봇 시작 메시지."""
     text = (
         "GeoLight — 시장 망원경\n"
-        "해외 뉴스를 한국장 영향으로 번역합니다.\n\n"
-        "명령어:\n"
-        "/now — 현재 주요 이벤트 + 영향 섹터\n"
-        "/scenario — 시나리오 투자 지도\n"
-        "/action — 오늘의 행동 가이드\n"
-        "/budget — 예산 집행 가이드\n"
-        "/profile — 내 투자 설정\n"
-        "/alert — 알림 상태 확인\n"
-        "/hot — 관심 급증 종목\n"
-        "/ask [질문] — AI에게 시장 분석 질문\n"
-        "/help — 도움말"
+        "해외 뉴스와 시장 지표를 한국 투자 관점으로 요약합니다.\n\n"
+        "바로 써볼 명령:\n"
+        "/now  현재 이벤트와 핵심 지표\n"
+        "/action  오늘 매수/관망 판단\n"
+        "/budget  이번 달 예산 실행안\n"
+        "/profile  내 성향/예산 설정\n"
+        "/help  전체 명령 안내"
     )
     await update.message.reply_text(text)
 
@@ -126,14 +157,17 @@ async def cmd_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     seen_types.add(evt["event_type"])
                     unique_events.append(evt)
 
-            lines = ["GeoLight — 현재 이벤트 요약", "=" * 30, ""]
+            lines = ["GeoLight — 현재 이벤트 요약", ""]
+
+            if unique_events:
+                top_event = unique_events[0]["event_type"]
+                lines.append(f"한줄 해석: 지금은 `{top_event}` 흐름을 가장 먼저 볼 구간입니다.")
+                lines.append("")
 
             for evt in unique_events[:5]:
                 mapping = map_event_to_sectors(evt["event_type"])
                 if mapping:
-                    lines.append(format_sector_summary(mapping))
-                    if evt.get("title"):
-                        lines.append(f"  뉴스: {evt['title'][:60]}")
+                    lines.extend(_format_event_brief(mapping, evt.get("title", "")))
                     lines.append("")
 
         else:
@@ -149,7 +183,12 @@ async def cmd_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     articles.extend(fetch_rss_feed(name, url)[:5])
 
             if not articles:
-                await update.message.reply_text("수집된 뉴스가 없습니다.")
+                await update.message.reply_text(
+                    _data_unavailable_message(
+                        "뉴스 데이터",
+                        "/scenario 또는 /alert 로 가격 지표부터 먼저 확인할 수 있습니다.",
+                    )
+                )
                 return
 
             # 키워드 분류만 (LLM 호출 안 함)
@@ -162,7 +201,10 @@ async def cmd_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     all_events.append(evt)
 
             if not all_events:
-                await update.message.reply_text("현재 특별한 이벤트가 감지되지 않았습니다.")
+                await update.message.reply_text(
+                    "지금은 뚜렷한 이벤트가 감지되지 않았습니다.\n"
+                    "대신 /scenario 나 /action 으로 가격 기반 판단을 먼저 확인해 보세요."
+                )
                 return
 
             seen_types = set()
@@ -173,25 +215,21 @@ async def cmd_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     unique_events.append(evt)
 
             mappings = translate_news_to_sectors(unique_events)
-            lines = ["GeoLight — 현재 이벤트 요약", "=" * 30, ""]
+            lines = ["GeoLight — 현재 이벤트 요약", ""]
             for m in mappings[:5]:
-                lines.append(format_sector_summary(m))
+                lines.extend(_format_event_brief(m))
                 lines.append("")
 
         # 가격 현황 추가
         prices = fetch_all_prices()
         if prices:
-            indicator_names = {
-                "oil_wti": "WTI 유가",
-                "oil_brent": "브렌트유",
-                "usd_krw": "USD/KRW",
-                "vix": "VIX",
-                "kospi": "KOSPI",
-            }
+            if len(lines) > 2:
+                lines.append("지금 먼저 볼 지표")
+                lines.append("-" * 25)
             lines.append("주요 지표")
             lines.append("-" * 25)
             for ind, p in prices.items():
-                name = indicator_names.get(ind, ind)
+                name = INDICATOR_DISPLAY_NAMES.get(ind, ind)
                 lines.append(f"  {name}: {p['value']:,.2f} ({p['change_pct']:+.2f}%)")
 
         text = "\n".join(lines)
@@ -199,7 +237,12 @@ async def cmd_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error("/now 처리 실패: %s", e, exc_info=True)
-        await update.message.reply_text(f"처리 중 오류: {e}")
+        await update.message.reply_text(
+            _command_error_message(
+                "/now",
+                "뉴스 또는 가격 데이터를 가져오는 중 일시적 문제가 발생했습니다.",
+            )
+        )
 
 
 async def cmd_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -232,29 +275,35 @@ async def cmd_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error("/scenario 처리 실패: %s", e, exc_info=True)
-        await update.message.reply_text(f"처리 중 오류: {e}")
+        await update.message.reply_text(
+            _command_error_message(
+                "/scenario",
+                "가격 지표를 기반으로 시나리오를 계산하는 중 문제가 발생했습니다.",
+            )
+        )
 
 
 async def cmd_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """알림 상태 확인."""
     from config import THRESHOLDS
 
-    lines = ["GeoLight — 알림 설정 상태", "=" * 30, ""]
-
-    indicator_names = {
-        "oil_wti": "WTI 유가",
-        "oil_brent": "브렌트 유가",
-        "usd_krw": "USD/KRW 환율",
-        "vix": "VIX 공포지수",
-        "kospi": "KOSPI",
-    }
+    lines = [
+        "GeoLight — 알림 설정 상태",
+        "한줄 해석: 아래 기준을 넘기면 자동 알림이 발송됩니다.",
+        "",
+    ]
 
     for ind, cfg in THRESHOLDS.items():
-        name = indicator_names.get(ind, ind)
-        lines.append(f"  {name}: ±{cfg['pct']}% (쿨다운 {cfg['cooldown_min']}분)")
+        name = INDICATOR_DISPLAY_NAMES.get(ind, ind)
+        lines.append(
+            f"- {name}: 전일 대비 ±{cfg['pct']}% 이상, 이후 {cfg['cooldown_min']}분 쿨다운"
+        )
 
     lines.append("")
-    lines.append("임계치 돌파 시 자동으로 알림이 발송됩니다.")
+    lines.append("예시")
+    lines.append("-" * 25)
+    lines.append("USD/KRW가 하루에 +2% 이상 움직이면 환율 급변 알림이 갑니다.")
+    lines.append("VIX가 +20% 이상 급등하면 변동성 경고 알림이 갑니다.")
 
     await update.message.reply_text("\n".join(lines))
 
@@ -269,30 +318,32 @@ async def cmd_hot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _send_message(update.effective_chat.id, text, context)
     except Exception as e:
         logger.error("/hot 처리 실패: %s", e, exc_info=True)
-        await update.message.reply_text(f"처리 중 오류: {e}")
+        await update.message.reply_text(
+            _command_error_message(
+                "/hot",
+                "종목 데이터를 조회하는 중 문제가 발생했습니다.",
+            )
+        )
 
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """도움말."""
     text = (
         "GeoLight 명령어 안내\n\n"
-        "/now — 현재 주요 이벤트 + 영향 섹터 요약\n"
-        "  해외 뉴스를 수집·분류하여 한국장 영향을 번역합니다.\n\n"
-        "/scenario — 시나리오 투자 지도\n"
-        "  확전/완화/쇼크 등 시나리오별 수혜·피해 섹터를 보여줍니다.\n\n"
-        "/alert — 알림 설정 상태\n"
-        "  유가/환율/VIX 임계치 설정을 확인합니다.\n\n"
-        "/hot — 관심 급증 종목\n"
-        "  거래대금 급증 + 급락 후 반등 후보를 보여줍니다.\n\n"
-        "/action — 오늘의 행동 가이드\n"
-        "  시장 상태를 분석하여 관망/분할매수/적극진입 등 행동 모드를 제안합니다.\n\n"
-        "/budget — 예산 집행 가이드\n"
-        "  행동 모드 + 투자 성향 기반 이번 달 투자 집행 비율을 보여줍니다.\n\n"
-        "/profile [성향] [예산] — 내 투자 설정\n"
-        "  예: /profile 공격 200만  |  /profile 보수\n\n"
-        "/ask [질문] — AI 시장 분석\n"
-        "  지정학·거시경제 관련 질문에 Gemini AI가 답변합니다.\n"
-        "  예: /ask 중동 긴장이 한국 반도체에 미치는 영향은?\n"
+        "지금 시장 보기\n"
+        "- /now  현재 이벤트와 핵심 지표 요약\n"
+        "- /scenario  지금 우세한 시나리오와 볼/피할 섹터\n"
+        "- /alert  자동 알림 기준 확인\n"
+        "- /hot  수급 몰림 종목과 낙폭 큰 종목 보기\n\n"
+        "오늘 행동 정하기\n"
+        "- /action  오늘 매수/관망 판단\n"
+        "- /budget  이번 달 예산 실행안\n\n"
+        "내 설정\n"
+        "- /profile  현재 설정 보기\n"
+        "- /profile 공격 200만\n"
+        "- /profile 소득 500만 지출 300만\n\n"
+        "질문하기\n"
+        "- /ask 중동 긴장이 한국 반도체에 미치는 영향은?\n"
     )
     await update.message.reply_text(text)
 
@@ -329,7 +380,12 @@ async def cmd_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         prices = fetch_all_prices()
         if not prices:
-            await update.message.reply_text("가격 데이터를 조회할 수 없습니다.")
+            await update.message.reply_text(
+                _data_unavailable_message(
+                    "가격 지표",
+                    "/now 또는 /alert 는 먼저 확인할 수 있을 수 있습니다.",
+                )
+            )
             return
 
         indicators = _build_indicators(prices)
@@ -351,7 +407,12 @@ async def cmd_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error("/action 처리 실패: %s", e, exc_info=True)
-        await update.message.reply_text(f"처리 중 오류: {e}")
+        await update.message.reply_text(
+            _command_error_message(
+                "/action",
+                "행동 모드를 계산하는 중 문제가 발생했습니다.",
+            )
+        )
 
 
 async def cmd_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -359,7 +420,12 @@ async def cmd_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         prices = fetch_all_prices()
         if not prices:
-            await update.message.reply_text("가격 데이터를 조회할 수 없습니다.")
+            await update.message.reply_text(
+                _data_unavailable_message(
+                    "가격 지표",
+                    "/profile 설정은 유지되며, 잠시 뒤 /budget 을 다시 시도해 주세요.",
+                )
+            )
             return
 
         indicators = _build_indicators(prices)
@@ -402,7 +468,12 @@ async def cmd_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.error("/budget 처리 실패: %s", e, exc_info=True)
-        await update.message.reply_text(f"처리 중 오류: {e}")
+        await update.message.reply_text(
+            _command_error_message(
+                "/budget",
+                "예산 실행안을 계산하는 중 문제가 발생했습니다.",
+            )
+        )
 
 
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -485,7 +556,12 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(str(e))
     except Exception as e:
         logger.error("/profile 처리 실패: %s", e, exc_info=True)
-        await update.message.reply_text(f"처리 중 오류: {e}")
+        await update.message.reply_text(
+            _command_error_message(
+                "/profile",
+                "설정을 저장하는 중 문제가 발생했습니다.",
+            )
+        )
 
 
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -516,7 +592,12 @@ async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         logger.error("/ask 처리 실패: %s", e, exc_info=True)
-        await update.message.reply_text(f"AI 처리 오류: {e}")
+        await update.message.reply_text(
+            _command_error_message(
+                "/ask",
+                "AI 응답을 만드는 중 문제가 발생했습니다.",
+            )
+        )
 
 
 # ── 봇 초기화 ─────────────────────────────────────────────

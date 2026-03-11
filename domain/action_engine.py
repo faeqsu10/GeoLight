@@ -8,6 +8,10 @@ from datetime import date
 from typing import Optional
 
 from config import (
+    ACTION_AGGRESSIVE_SCENARIOS,
+    ACTION_EVENT_BUCKETS,
+    ACTION_MODE_FLOW,
+    ACTION_URGENT_RULES,
     ACTION_RISK_RULES,
     ACTION_SCENARIO_SCORES,
     ACTION_MODES,
@@ -29,14 +33,13 @@ _today_date: Optional[str] = None     # 캐시 날짜
 
 def _is_urgent(indicators: dict) -> bool:
     """급변 조건 감지 — 캐시 무시하고 재계산 필요 여부."""
-    if indicators.get("vix", 0) >= 30:
-        return True
-    if abs(indicators.get("usd_krw_change_pct", 0)) >= 2.0:
-        return True
-    if abs(indicators.get("oil_wti_change_pct", 0)) >= 5.0:
-        return True
-    if abs(indicators.get("kospi_change_pct", 0)) >= 3.0:
-        return True
+    for rule in ACTION_URGENT_RULES:
+        value = indicators.get(rule["indicator"])
+        if value is None:
+            continue
+        compared = abs(value) if rule.get("abs") else value
+        if compared >= rule["threshold"]:
+            return True
     return False
 
 
@@ -125,8 +128,8 @@ def calculate_risk_score(
 
     # 3) 최근 이벤트 기반 보조 점수
     if events:
-        tension_types = {"geopolitical_tension", "oil_surge", "vix_spike", "fx_krw_weak"}
-        ease_types = {"geopolitical_ease", "oil_crash", "vix_drop", "rate_cut", "fx_krw_strong"}
+        tension_types = ACTION_EVENT_BUCKETS["tension"]
+        ease_types = ACTION_EVENT_BUCKETS["ease"]
 
         tension_count = sum(1 for e in events if e.get("event_type") in tension_types)
         ease_count = sum(1 for e in events if e.get("event_type") in ease_types)
@@ -148,7 +151,7 @@ def determine_action_mode(
     """위험 점수 → 행동 모드 키 결정."""
     # 공격적 진입: 위험 점수 1 이하 + 완화 시나리오
     if risk_score <= 1:
-        if scenario and scenario.get("key") in ("de_escalation", "rate_easing"):
+        if scenario and scenario.get("key") in ACTION_AGGRESSIVE_SCENARIOS:
             if scenario.get("score", 0) > 0.3:
                 return "aggressive"
 
@@ -186,6 +189,9 @@ def get_action_result(
             "warnings": list[str],
             "focus_sectors": list[str],
             "scenario_name": str,
+            "scenario_description": str,
+            "scenario_meaning": str,
+            "exit_signals": list[str],
         }
     """
     global _last_action, _last_action_time, _today_result, _today_date
@@ -213,15 +219,14 @@ def get_action_result(
         prev_key = _last_action.get("mode_key")
         if prev_key and prev_key != mode_key:
             # 2단계 이상 점프 방지
-            mode_order = ["aggressive", "normal_dca", "rebalance", "conservative_dca", "hold"]
-            if prev_key in mode_order and mode_key in mode_order:
-                prev_idx = mode_order.index(prev_key)
-                new_idx = mode_order.index(mode_key)
+            if prev_key in ACTION_MODE_FLOW and mode_key in ACTION_MODE_FLOW:
+                prev_idx = ACTION_MODE_FLOW.index(prev_key)
+                new_idx = ACTION_MODE_FLOW.index(mode_key)
                 if abs(prev_idx - new_idx) > 1:
                     # 중간 단계로 제한
                     mid_idx = prev_idx + (1 if new_idx > prev_idx else -1)
                     original_mode = ACTION_MODES.get(mode_key, {}).get("name", mode_key)
-                    mode_key = mode_order[mid_idx]
+                    mode_key = ACTION_MODE_FLOW[mid_idx]
                     risk_reasons.append(
                         f"모드 전환 조정: {_last_action['mode']['name']}→{original_mode} "
                         f"요청이나, 1단계씩 이동"
@@ -254,6 +259,9 @@ def get_action_result(
         "warnings": warnings,
         "focus_sectors": focus_sectors,
         "scenario_name": scenario.get("name", "없음") if scenario else "없음",
+        "scenario_description": scenario.get("description", "") if scenario else "",
+        "scenario_meaning": scenario.get("meaning", "") if scenario else "",
+        "exit_signals": list(scenario.get("exit_signals", [])) if scenario else [],
     }
 
     # 캐시 갱신 (lock 보호)
@@ -289,84 +297,130 @@ def format_action_card(result: dict, budget: dict = None) -> str:
     """
     mode = result["mode"]
 
-    # ── 한 줄 결론 (맨 위) ──
-    sector_names = []
-    for sector in result.get("focus_sectors", [])[:3]:
-        sector_names.append(sector)
-    sector_text = "·".join(sector_names) if sector_names else ""
+    sector_names = result.get("focus_sectors", [])[:3]
+    sector_text = "·".join(sector_names)
 
+    budget_amount_line = ""
+    budget_ratio_line = ""
     if budget and budget.get("monthly_budget"):
         low, high = budget["execute_amount"]
-        if sector_text:
-            summary = f"{low:,}~{high:,}원을 {sector_text}에 분할 매수"
-        else:
-            summary = f"{low:,}~{high:,}원 분할 매수"
-    elif sector_text:
-        adj_low, adj_high = (budget or {}).get("adjusted_ratio", mode["budget_ratio"])
-        summary = f"예산의 {adj_low}~{adj_high}%를 {sector_text}에 분할 매수"
+        reserve = budget.get("reserve_amount", 0)
+        budget_amount_line = f"{low:,}~{high:,}원 집행"
+        if reserve > 0:
+            budget_amount_line += f", {reserve:,}원 대기"
+    else:
+        ratio_low, ratio_high = (budget or {}).get("adjusted_ratio", mode["budget_ratio"])
+        budget_ratio_line = f"예산의 {ratio_low}~{ratio_high}% 집행"
+
+    if result["mode_key"] == "hold":
+        summary = "오늘은 신규 매수보다 보유 점검과 현금 확보가 우선"
+    elif budget_amount_line and sector_text:
+        summary = f"{budget_amount_line}, {sector_text} 분할 접근"
+    elif budget_amount_line:
+        summary = budget_amount_line
+    elif budget_ratio_line and sector_text:
+        summary = f"{budget_ratio_line}, {sector_text} 우선"
+    elif budget_ratio_line:
+        summary = budget_ratio_line
     else:
         summary = mode["guide"]
 
-    # hold 모드일 때는 결론 다르게
-    if result["mode_key"] == "hold":
-        summary = "신규 매수 보류, 현금 비중 확대"
-
     lines = [
-        f"{mode['emoji']} 오늘의 결론",
-        f"  {summary}",
-        "",
-        f"행동 모드: {mode['name']} (위험 {result['risk_score']}점)",
-        f"시나리오: {result['scenario_name']}",
+        f"{mode['emoji']} {mode['name']}",
+        f"한줄 요약: {summary}",
+        f"시나리오: {result['scenario_name']} | 위험점수: {result['risk_score']}점",
         "",
     ]
 
-    # ── 할 일 (번호 매기기) ──
-    lines.append("할 일")
-    lines.append("-" * 25)
+    if result.get("scenario_meaning") or result.get("scenario_description"):
+        lines.extend([
+            "시나리오 설명",
+            "-" * 25,
+        ])
+        if result.get("scenario_meaning"):
+            lines.append(f"  {result['scenario_meaning']}")
+        elif result.get("scenario_description"):
+            lines.append(f"  {result['scenario_description']}")
+        lines.append("")
 
+    lines.append("오늘 할 것")
+    lines.append("-" * 25)
     if result["mode_key"] == "hold":
-        lines.append("  1. 신규 매수 보류")
-        lines.append("  2. 기존 보유 종목 유지")
-        lines.append("  3. 현금 비중 확대")
-    elif result["mode_key"] == "aggressive":
-        lines.append("  1. 예산의 50~80% 적극 집행")
-        lines.append("  2. 아래 관심 섹터 집중 매수")
-        lines.append("  3. 분할 매수 원칙은 유지")
+        lines.append("  1. 신규 매수는 보류")
+        lines.append("  2. 기존 보유 종목과 현금 비중만 점검")
+        lines.append("  3. 아래 섹터는 매수보다 관찰 대상으로 유지")
     else:
-        low, high = mode["budget_ratio"]
-        lines.append(f"  1. 예산의 {low}~{high}% 분할 집행")
-        lines.append("  2. 아래 관심 섹터 위주 분산 매수")
-        lines.append("  3. 나머지는 현금 대기")
+        if budget_amount_line:
+            lines.append(f"  1. 집행 범위: {budget_amount_line}")
+        elif budget_ratio_line:
+            lines.append(f"  1. 집행 범위: {budget_ratio_line}")
+        else:
+            lines.append(f"  1. 집행 기준: {mode['guide']}")
+
+        if sector_text:
+            lines.append(f"  2. 우선 섹터: {sector_text}")
+        else:
+            lines.append("  2. 시나리오와 무관한 추격 진입은 피하기")
+
+        if result["mode_key"] == "aggressive":
+            lines.append("  3. 한 번에 몰지 말고 2~3회로 나눠 진입")
+        else:
+            lines.append("  3. 나머지 자금은 현금으로 대기")
     lines.append("")
 
-    # ── 관심 섹터 (구체적 종목) ──
+    avoid_lines = list(result.get("warnings", []))
+    if not avoid_lines:
+        if result["mode_key"] == "hold":
+            avoid_lines.append("반등 기대만으로 성급하게 신규 진입하지 않기")
+        else:
+            avoid_lines.append("한 번에 전액 진입하지 않기")
+
+    lines.append("피할 것")
+    lines.append("-" * 25)
+    for idx, item in enumerate(avoid_lines[:3], 1):
+        lines.append(f"  {idx}. {item}")
+    lines.append("")
+
     if result["focus_sectors"]:
-        lines.append("관심 섹터")
+        section_title = "관찰 섹터" if result["mode_key"] == "hold" else "우선 섹터"
+        lines.append(section_title)
         lines.append("-" * 25)
         for sector in result["focus_sectors"]:
             stocks = SECTOR_STOCKS.get(sector, [])
             if stocks:
-                names = ", ".join(s["name"] for s in stocks[:3])
+                names = ", ".join(s["name"] for s in stocks[:2])
                 lines.append(f"  {sector}: {names}")
             else:
                 lines.append(f"  {sector}")
         lines.append("")
 
-    # ── 경고 (있으면 먼저) ──
-    if result["warnings"]:
-        for w in result["warnings"]:
-            lines.append(f"⚠ {w}")
-        lines.append("")
+    exit_signals = list(result.get("exit_signals", []))
+    if not exit_signals:
+        if result["mode_key"] == "hold":
+            exit_signals = [
+                "반등이 나와도 기존 위험 포지션은 한 번에 늘리지 말고 축소부터 검토합니다.",
+                "현재 시나리오가 약해지지 않아도 현금 비중 확보가 우선입니다.",
+            ]
+        else:
+            exit_signals = [
+                "반대 시나리오가 우세해지면 현재 포지션을 분할로 줄입니다.",
+                "단기 급등 수익분은 2~3회로 나눠 익절합니다.",
+            ]
 
-    # ── 참고 (위험+기회 요인 축약) ──
+    lines.append("줄이거나 뺄 때")
+    lines.append("-" * 25)
+    for idx, signal in enumerate(exit_signals[:3], 1):
+        lines.append(f"  {idx}. {signal}")
+    lines.append("")
+
     factors = []
-    for r in result["risk_reasons"][:3]:
+    for r in result["risk_reasons"][:2]:
         factors.append(f"  ▲ {r}")
     for r in result.get("opp_reasons", [])[:2]:
         factors.append(f"  ▽ {r}")
 
     if factors:
-        lines.append("참고")
+        lines.append("판단 근거")
         lines.append("-" * 25)
         lines.extend(factors)
 

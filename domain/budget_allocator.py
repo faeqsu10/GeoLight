@@ -2,7 +2,7 @@
 
 import logging
 
-from config import ACTION_MODES, BUDGET_PROFILE_MULTIPLIER
+from config import ACTION_MODES, BUDGET_PROFILE_MULTIPLIER, PROFILE_NAMES
 
 logger = logging.getLogger("geolight.domain.budget")
 
@@ -101,12 +101,7 @@ def calculate_budget(
     reserve = monthly_budget - exec_high if monthly_budget else 0
 
     # 설명 생성
-    profile_names = {
-        "conservative": "보수",
-        "neutral": "중립",
-        "aggressive": "공격",
-    }
-    profile_name = profile_names.get(risk_profile, risk_profile)
+    profile_name = PROFILE_NAMES.get(risk_profile, risk_profile)
 
     if monthly_budget:
         explanation = (
@@ -137,71 +132,96 @@ def format_budget_card(budget: dict, action_result: dict,
     from config import SECTOR_STOCKS
 
     mode = action_result["mode"]
+    focus_sectors = action_result.get("focus_sectors", [])
     lines = [
-        f"💰 이번 달 예산 집행 가이드",
-        "",
-        f"{mode['emoji']} {mode['name']} | {budget['explanation']}",
-        "",
+        "💰 이번 달 예산 가이드",
+        f"{mode['emoji']} {mode['name']}",
     ]
 
-    # ── 월급 배분 (소득/지출 설정된 경우) ──
+    if budget["monthly_budget"]:
+        low, high = budget["execute_amount"]
+        reserve = budget["reserve_amount"]
+        if action_result["mode_key"] == "hold":
+            summary = "이번 달은 신규 매수보다 현금 유지 비중이 높습니다."
+        else:
+            summary = f"이번 달 투자예산 {budget['monthly_budget']:,}원 중 {low:,}~{high:,}원만 집행하세요."
+            if reserve > 0:
+                summary += f" 나머지 {reserve:,}원은 대기 자금입니다."
+    else:
+        adj_low, adj_high = budget["adjusted_ratio"]
+        summary = f"이번 달 투자예산의 {adj_low}~{adj_high}%만 집행하는 기준입니다."
+    lines.extend(["한줄 요약: " + summary, ""])
+
     if investable and investable.get("disposable", 0) > 0:
         lines.extend([
             "월급 배분",
             "-" * 25,
             f"  가용 자금: {investable['disposable']:,}원",
-            f"  → 투자: {investable['invest_amount']:,}원 ({investable['invest_ratio']*100:.0f}%)",
-            f"  → 저축: {investable['savings_amount']:,}원",
-            f"  → 비상금: {investable['emergency_amount']:,}원",
+            f"  투자: {investable['invest_amount']:,}원 ({investable['invest_ratio']*100:.0f}%)",
+            f"  저축: {investable['savings_amount']:,}원",
+            f"  비상금: {investable['emergency_amount']:,}원",
             "",
         ])
 
     if budget["monthly_budget"]:
-        low, high = budget["execute_amount"]
-        reserve = budget["reserve_amount"]
         lines.extend([
-            f"투자 예산: {budget['monthly_budget']:,}원",
-            f"집행 금액: {low:,}~{high:,}원",
-            f"대기 자금: {reserve:,}원",
+            "이번 달 실행안",
+            "-" * 25,
+            f"  투자 예산: {budget['monthly_budget']:,}원",
+            f"  집행 금액: {low:,}~{high:,}원",
+            f"  대기 자금: {reserve:,}원",
             "",
         ])
 
-        # ── 섹터별 금액 배분 ──
-        focus_sectors = action_result.get("focus_sectors", [])
         if focus_sectors and action_result["mode_key"] != "hold":
             n_sectors = len(focus_sectors)
             sector_low = low // n_sectors
             sector_high = high // n_sectors
 
-            lines.append("섹터별 배분 (균등 기준)")
+            lines.append("섹터별 실행안")
             lines.append("-" * 25)
             for sector in focus_sectors:
                 stocks = SECTOR_STOCKS.get(sector, [])
-                stock_names = ", ".join(s["name"] for s in stocks[:3]) if stocks else ""
+                stock_names = ", ".join(s["name"] for s in stocks[:2]) if stocks else ""
                 lines.append(f"  {sector}: {sector_low:,}~{sector_high:,}원")
                 if stock_names:
-                    lines.append(f"    → {stock_names}")
+                    lines.append(f"    예시 종목: {stock_names}")
             lines.append("")
-            lines.append("* 확신도에 따라 섹터 비중 조절 가능")
+            lines.append("메모: 확신이 높아도 한 섹터 몰빵보다는 분할이 안전합니다.")
         elif action_result["mode_key"] == "hold":
-            lines.append("현재 관망 모드 — 신규 매수 보류")
-            lines.append("기존 보유 종목 유지, 현금 비중 확대")
+            lines.append("현재는 관망 구간입니다.")
+            lines.append("신규 매수보다 기존 보유 관리와 현금 비중 확보가 우선입니다.")
+
+        exit_signals = list(action_result.get("exit_signals", []))
+        if exit_signals:
+            lines.extend([
+                "",
+                "회수 기준",
+                "-" * 25,
+            ])
+            for idx, signal in enumerate(exit_signals[:3], 1):
+                lines.append(f"  {idx}. {signal}")
     else:
         adj_low, adj_high = budget["adjusted_ratio"]
         lines.extend([
-            f"집행 비율: {adj_low}~{adj_high}%",
+            "이번 달 실행안",
+            "-" * 25,
+            f"  집행 비율: {adj_low}~{adj_high}%",
             "",
-            "💡 /profile 200만  ← 월 예산 설정하면",
-            "   섹터별 금액까지 알려드려요",
+            "다음 단계",
+            "-" * 25,
+            "  /profile 200만",
+            "  월 투자 예산을 넣으면 금액 단위로 바로 계산됩니다.",
         ])
 
-    # 소득/지출 미설정 안내
     if not investable or investable.get("disposable", 0) == 0:
         if budget["monthly_budget"]:
             lines.extend([
                 "",
-                "💡 /profile 소득 500만 지출 300만",
-                "   → 월급 배분까지 알려드려요",
+                "다음 단계",
+                "-" * 25,
+                "  /profile 소득 500만 지출 300만",
+                "  월급 배분까지 함께 계산할 수 있습니다.",
             ])
 
     return "\n".join(lines)

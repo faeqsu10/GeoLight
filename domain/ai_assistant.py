@@ -8,7 +8,13 @@ from typing import Optional
 
 import requests
 
-from config import GEMINI_API_KEY, GEMINI_MODEL, GEMINI_MAX_TOKENS, GEMINI_DAILY_LIMIT
+from config import (
+    GEMINI_API_KEY,
+    GEMINI_DAILY_LIMIT,
+    GEMINI_MAX_TOKENS,
+    GEMINI_MODEL,
+    INDICATOR_DISPLAY_NAMES,
+)
 
 logger = logging.getLogger("geolight.domain.ai")
 
@@ -101,7 +107,7 @@ class AIAssistant:
             return "AI 응답 시간 초과. 잠시 후 다시 시도해주세요."
         except Exception as e:
             logger.error("/ask 처리 실패: %s", e, exc_info=True)
-            return f"AI 처리 오류: {e}"
+            return "AI 응답을 생성하는 중 문제가 발생했습니다. 잠시 후 다시 시도해주세요."
 
 
 def build_market_context() -> str:
@@ -113,15 +119,8 @@ def build_market_context() -> str:
         from data.price_fetcher import fetch_all_prices
         prices = fetch_all_prices()
         if prices:
-            names = {
-                "oil_wti": "WTI 유가",
-                "oil_brent": "브렌트유",
-                "usd_krw": "USD/KRW",
-                "vix": "VIX",
-                "kospi": "KOSPI",
-            }
             for ind, p in prices.items():
-                name = names.get(ind, ind)
+                name = INDICATOR_DISPLAY_NAMES.get(ind, ind)
                 lines.append(f"{name}: {p['value']:,.2f} ({p['change_pct']:+.2f}%)")
     except Exception:
         pass

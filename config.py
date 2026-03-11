@@ -33,13 +33,65 @@ NEWS_INTERVAL_MIN = 30
 PRICE_INTERVAL_MIN = 5
 SCENARIO_INTERVAL_MIN = 60
 
-# ── 임계치 설정 ──────────────────────────────────────────
+# ── 지표 공통 설정 ────────────────────────────────────────
+INDICATORS = {
+    "oil_wti": {
+        "ticker": "CL=F",
+        "display_name": "WTI 유가",
+        "threshold_pct": 7.0,
+        "cooldown_min": 60,
+    },
+    "oil_brent": {
+        "ticker": "BZ=F",
+        "display_name": "브렌트 유가",
+        "threshold_pct": 7.0,
+        "cooldown_min": 60,
+    },
+    "usd_krw": {
+        "ticker": "KRW=X",
+        "display_name": "USD/KRW 환율",
+        "threshold_pct": 2.0,
+        "cooldown_min": 60,
+    },
+    "vix": {
+        "ticker": "^VIX",
+        "display_name": "VIX 공포지수",
+        "threshold_pct": 20.0,
+        "cooldown_min": 60,
+    },
+    "kospi": {
+        "ticker": "^KS11",
+        "display_name": "KOSPI",
+        "threshold_pct": 4.0,
+        "cooldown_min": 60,
+    },
+}
+
 THRESHOLDS = {
-    "oil_wti": {"pct": 7.0, "cooldown_min": 60},
-    "oil_brent": {"pct": 7.0, "cooldown_min": 60},
-    "usd_krw": {"pct": 2.0, "cooldown_min": 60},
-    "vix": {"pct": 20.0, "cooldown_min": 60},
-    "kospi": {"pct": 4.0, "cooldown_min": 60},
+    key: {
+        "pct": value["threshold_pct"],
+        "cooldown_min": value["cooldown_min"],
+    }
+    for key, value in INDICATORS.items()
+}
+
+INDICATOR_DISPLAY_NAMES = {
+    key: value["display_name"]
+    for key, value in INDICATORS.items()
+}
+
+INDICATOR_MEANINGS = {
+    "oil_change_pct": "유가가 단기간에 얼마나 급하게 오르거나 내렸는지 보는 지표입니다.",
+    "oil_wti_change_pct": "WTI 유가의 단기 변동률입니다. 에너지·항공·화학에 영향이 큽니다.",
+    "oil_brent_change_pct": "브렌트유의 단기 변동률입니다. 글로벌 원자재 부담을 볼 때 참고합니다.",
+    "usd_krw_change_pct": "원/달러 환율의 단기 변동률입니다. 높아지면 원화 약세, 수입 부담 확대를 뜻합니다.",
+    "kospi_change_pct": "코스피 지수의 단기 변동률입니다. 시장 전체 위험 심리를 보여줍니다.",
+    "vix": "미국 변동성 지수입니다. 높을수록 시장의 공포와 불안이 크다는 뜻입니다.",
+}
+
+# 과거/요약 키 → 실제 입력 키 목록
+INDICATOR_ALIASES = {
+    "oil_change_pct": ["oil_wti_change_pct", "oil_brent_change_pct"],
 }
 
 # ── RSS 피드 소스 ─────────────────────────────────────────
@@ -326,6 +378,12 @@ SCENARIOS = {
     "escalation": {
         "name": "확전 시나리오",
         "description": "중동/지정학 긴장 확대, 유가 급등, 안전자산 선호",
+        "meaning": "전쟁이나 분쟁 리스크가 커지는 구간입니다. 보통 유가와 방산, 에너지 쪽이 강하고 항공·여행·소비는 부담이 커집니다.",
+        "exit_signals": [
+            "유가 상승세가 꺾이거나 VIX가 빠르게 내려오면 방산·에너지 비중을 먼저 줄입니다.",
+            "휴전, 협상 진전, 긴장 완화 뉴스가 나오면 확전 수혜 포지션은 분할로 정리합니다.",
+            "단기 급등으로 수익이 난 종목은 한 번에 다 팔지 말고 2~3회로 나눠 익절합니다.",
+        ],
         "indicators": {"oil_change_pct": (5.0, None), "vix": (25.0, None)},
         "beneficiary_sectors": ["방산", "LNG", "에너지", "정유", "금"],
         "damaged_sectors": ["항공", "여행", "소비", "성장주"],
@@ -333,6 +391,12 @@ SCENARIOS = {
     "de_escalation": {
         "name": "완화 시나리오",
         "description": "지정학 긴장 완화, 유가 하락, 위험자산 선호 복귀",
+        "meaning": "전쟁이나 지정학 리스크가 누그러지는 구간입니다. 항공·여행·소비처럼 눌렸던 섹터가 회복하기 쉬운 흐름입니다.",
+        "exit_signals": [
+            "유가가 다시 급반등하거나 VIX가 재상승하면 여행·소비 회복주 비중을 줄입니다.",
+            "전쟁 재확대 헤드라인이 나오면 완화 시나리오 전제는 약해지므로 분할 회수합니다.",
+            "단기 반등 후 거래대금이 줄면 일부 익절해 현금 비중을 다시 확보합니다.",
+        ],
         "indicators": {"oil_change_pct": (None, -5.0), "vix": (None, 20.0)},
         "beneficiary_sectors": ["항공", "여행", "소비", "성장주", "바이오"],
         "damaged_sectors": ["방산"],
@@ -340,6 +404,12 @@ SCENARIOS = {
     "market_shock": {
         "name": "시장 쇼크 시나리오",
         "description": "코스피 급락, 원화 약세, 과매도 대형주 반등 후보",
+        "meaning": "시장 전체가 급하게 흔들리는 구간입니다. 지수 급락과 환율 불안이 같이 오면 방어가 우선이고, 반등은 분할로 접근해야 합니다.",
+        "exit_signals": [
+            "코스피가 반등하고 환율이 안정되면 과매도 반등분은 일부 회수합니다.",
+            "환율 불안이 계속되면 반등 기대 포지션을 더 늘리지 말고 비중을 줄입니다.",
+            "반등 없이 추가 하락이 이어지면 손절 기준을 미리 정한 범위에서 실행합니다.",
+        ],
         "indicators": {"kospi_change_pct": (None, -3.0), "usd_krw_change_pct": (1.5, None)},
         "beneficiary_sectors": ["반도체", "자동차", "은행"],
         "damaged_sectors": ["소형주", "바이오", "성장주"],
@@ -347,6 +417,12 @@ SCENARIOS = {
     "rate_tightening": {
         "name": "긴축 시나리오",
         "description": "미국 금리 인상 기조, 달러 강세, 금융주 수혜",
+        "meaning": "금리가 높은 쪽으로 가는 구간입니다. 성장주에는 부담이 되고 은행·보험 같은 금융주는 상대적으로 유리할 수 있습니다.",
+        "exit_signals": [
+            "금리 인하 기대가 다시 커지면 금융주 중심 포지션은 분할 축소합니다.",
+            "달러 강세가 꺾이면 수출·금융 수혜 논리가 약해질 수 있어 일부 회수합니다.",
+            "실적 확인 없이 밸류만 급하게 오른 종목은 비중을 줄여 수익을 확정합니다.",
+        ],
         "indicators": {"vix": (None, 25.0), "usd_krw_change_pct": (1.0, None)},
         "beneficiary_sectors": ["은행", "보험", "수출주"],
         "damaged_sectors": ["성장주", "부동산", "리츠"],
@@ -354,6 +430,12 @@ SCENARIOS = {
     "rate_easing": {
         "name": "완화 시나리오 (금리)",
         "description": "금리 인하 기대, 유동성 확대, 성장주 수혜",
+        "meaning": "금리 부담이 줄어드는 구간입니다. 성장주와 바이오처럼 밸류에이션 민감한 자산이 상대적으로 숨통이 트이는 흐름입니다.",
+        "exit_signals": [
+            "장기금리가 다시 오르거나 VIX가 반등하면 성장주 비중을 줄입니다.",
+            "금리 인하 기대가 후퇴하면 밸류 민감주 수익분부터 먼저 회수합니다.",
+            "급등 구간에서는 한 번에 매도하지 말고 2~3회로 나눠 익절합니다.",
+        ],
         "indicators": {"vix": (None, 18.0)},
         "beneficiary_sectors": ["성장주", "부동산", "리츠", "바이오"],
         "damaged_sectors": ["은행"],
@@ -445,6 +527,44 @@ BUDGET_PROFILE_MULTIPLIER = {
     "neutral": 1.0,        # 중립: 기본 비율 그대로
     "aggressive": 1.3,     # 공격: 기본 비율의 130%
 }
+
+PROFILE_NAMES = {
+    "conservative": "보수",
+    "neutral": "중립",
+    "aggressive": "공격",
+}
+
+PROFILE_ALIASES = {
+    "보수": "conservative",
+    "보수적": "conservative",
+    "중립": "neutral",
+    "공격": "aggressive",
+    "공격적": "aggressive",
+}
+
+ACTION_MODE_FLOW = [
+    "aggressive",
+    "normal_dca",
+    "conservative_dca",
+    "hold",
+]
+
+ACTION_AGGRESSIVE_SCENARIOS = {
+    "de_escalation",
+    "rate_easing",
+}
+
+ACTION_EVENT_BUCKETS = {
+    "tension": {"geopolitical_tension", "oil_surge", "vix_spike", "fx_krw_weak"},
+    "ease": {"geopolitical_ease", "oil_crash", "vix_drop", "rate_cut", "fx_krw_strong"},
+}
+
+ACTION_URGENT_RULES = [
+    {"indicator": "vix", "abs": False, "threshold": 30.0},
+    {"indicator": "usd_krw_change_pct", "abs": True, "threshold": 2.0},
+    {"indicator": "oil_wti_change_pct", "abs": True, "threshold": 5.0},
+    {"indicator": "kospi_change_pct", "abs": True, "threshold": 3.0},
+]
 
 # ── 텔레그램 메시지 제한 ──────────────────────────────────
 TELEGRAM_MAX_LENGTH = 4096
