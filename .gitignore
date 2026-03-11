@@ -45,6 +45,10 @@ logs/*.log
 *.swp
 *.swo
 
+# 기획/메모 문서
+idea*.md
+info.md
+
 # OS
 .DS_Store
 Thumbs.db
