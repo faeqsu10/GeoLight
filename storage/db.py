@@ -65,8 +65,46 @@ def init_db():
                 created_at TEXT DEFAULT (datetime('now', 'localtime'))
             );
             CREATE INDEX IF NOT EXISTS idx_price_indicator ON price_snapshots(indicator);
+
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_user_id INTEGER UNIQUE NOT NULL,
+                risk_profile TEXT DEFAULT 'neutral',
+                monthly_budget INTEGER DEFAULT 0,
+                monthly_income INTEGER DEFAULT 0,
+                fixed_expenses INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_profile_user ON user_profiles(telegram_user_id);
+
+            CREATE TABLE IF NOT EXISTS action_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action_mode TEXT NOT NULL,
+                scenario_name TEXT,
+                risk_score INTEGER,
+                reasons_json TEXT,
+                warnings_json TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_action_created ON action_history(created_at);
         """)
         conn.commit()
+
+        # 마이그레이션: 기존 user_profiles에 새 컬럼 추가
+        try:
+            conn.execute("ALTER TABLE user_profiles ADD COLUMN monthly_income INTEGER DEFAULT 0")
+            conn.commit()
+            logger.info("마이그레이션: monthly_income 컬럼 추가")
+        except sqlite3.OperationalError:
+            pass  # 이미 존재
+        try:
+            conn.execute("ALTER TABLE user_profiles ADD COLUMN fixed_expenses INTEGER DEFAULT 0")
+            conn.commit()
+            logger.info("마이그레이션: fixed_expenses 컬럼 추가")
+        except sqlite3.OperationalError:
+            pass  # 이미 존재
+
         logger.info("DB 초기화 완료: %s", DB_PATH)
     finally:
         conn.close()
@@ -196,5 +234,78 @@ def get_latest_price(indicator: str) -> Optional[dict]:
             (indicator,),
         ).fetchone()
         return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ── 사용자 프로필 ────────────────────────────────────────
+
+def get_user_profile(telegram_user_id: int) -> Optional[dict]:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM user_profiles WHERE telegram_user_id = ?",
+            (telegram_user_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def save_user_profile(telegram_user_id: int, risk_profile: str,
+                      monthly_budget: int, monthly_income: int = 0,
+                      fixed_expenses: int = 0) -> None:
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO user_profiles "
+            "(telegram_user_id, risk_profile, monthly_budget, monthly_income, fixed_expenses) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(telegram_user_id) DO UPDATE SET "
+            "risk_profile = excluded.risk_profile, "
+            "monthly_budget = excluded.monthly_budget, "
+            "monthly_income = excluded.monthly_income, "
+            "fixed_expenses = excluded.fixed_expenses, "
+            "updated_at = datetime('now', 'localtime')",
+            (telegram_user_id, risk_profile, monthly_budget,
+             monthly_income, fixed_expenses),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ── 행동 이력 ─────────────────────────────────────────────
+
+def insert_action_history(action_mode: str, scenario_name: str,
+                          risk_score: int, reasons: list,
+                          warnings: list) -> int:
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "INSERT INTO action_history (action_mode, scenario_name, risk_score, "
+            "reasons_json, warnings_json) VALUES (?, ?, ?, ?, ?)",
+            (action_mode, scenario_name, risk_score,
+             json.dumps(reasons, ensure_ascii=False),
+             json.dumps(warnings, ensure_ascii=False)),
+        )
+        conn.commit()
+        return cur.lastrowid
+    finally:
+        conn.close()
+
+
+def get_last_action() -> Optional[dict]:
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM action_history ORDER BY created_at DESC LIMIT 1",
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["reasons"] = json.loads(d.pop("reasons_json", "[]"))
+        d["warnings"] = json.loads(d.pop("warnings_json", "[]"))
+        return d
     finally:
         conn.close()

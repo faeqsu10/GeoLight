@@ -23,6 +23,11 @@ if not GEMINI_API_KEY:
 # ── DB ────────────────────────────────────────────────────
 DB_PATH = os.getenv("DB_PATH", "geolight.db")
 
+# ── Gemini AI ─────────────────────────────────────────────
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MAX_TOKENS = int(os.getenv("GEMINI_MAX_TOKENS", "8192"))
+GEMINI_DAILY_LIMIT = int(os.getenv("GEMINI_DAILY_LIMIT", "10"))
+
 # ── 스케줄 간격 (분) ──────────────────────────────────────
 NEWS_INTERVAL_MIN = 30
 PRICE_INTERVAL_MIN = 5
@@ -353,6 +358,92 @@ SCENARIOS = {
         "beneficiary_sectors": ["성장주", "부동산", "리츠", "바이오"],
         "damaged_sectors": ["은행"],
     },
+}
+
+# ── Action Engine 설정 ────────────────────────────────────
+
+# 위험 점수 규칙: (지표 조건, 점수)
+ACTION_RISK_RULES = [
+    # 유가 급등
+    {"indicator": "oil_wti_change_pct", "condition": ">=", "value": 7.0, "score": 2, "reason": "WTI 유가 급등"},
+    {"indicator": "oil_brent_change_pct", "condition": ">=", "value": 7.0, "score": 2, "reason": "브렌트유 급등"},
+    # 유가 급락 (기회)
+    {"indicator": "oil_wti_change_pct", "condition": "<=", "value": -7.0, "score": -1, "reason": "유가 급락 (원가 부담 감소)"},
+    # 환율 급등
+    {"indicator": "usd_krw_change_pct", "condition": ">=", "value": 1.5, "score": 2, "reason": "원화 약세 (환율 급등)"},
+    {"indicator": "usd_krw_change_pct", "condition": ">=", "value": 2.5, "score": 1, "reason": "원화 급락 (추가 위험)"},
+    # 환율 안정
+    {"indicator": "usd_krw_change_pct", "condition": "<=", "value": -1.0, "score": -1, "reason": "원화 강세 (안정 신호)"},
+    # VIX
+    {"indicator": "vix", "condition": ">=", "value": 30.0, "score": 3, "reason": "VIX 공포 구간 (30 이상)"},
+    {"indicator": "vix", "condition": ">=", "value": 25.0, "score": 1, "reason": "VIX 경계 구간 (25 이상)"},
+    {"indicator": "vix", "condition": "<=", "value": 15.0, "score": -2, "reason": "VIX 안정 구간 (15 이하)"},
+    # KOSPI
+    {"indicator": "kospi_change_pct", "condition": "<=", "value": -3.0, "score": 3, "reason": "KOSPI 급락"},
+    {"indicator": "kospi_change_pct", "condition": ">=", "value": 2.0, "score": -1, "reason": "KOSPI 상승 (심리 개선)"},
+]
+
+# 시나리오별 위험 점수 가산
+ACTION_SCENARIO_SCORES = {
+    "escalation": 3,        # 확전 → 위험 +3
+    "market_shock": 3,      # 쇼크 → 위험 +3
+    "rate_tightening": 1,   # 긴축 → 위험 +1
+    "de_escalation": -2,    # 완화 → 위험 -2
+    "rate_easing": -2,      # 금리완화 → 위험 -2
+}
+
+# 행동 모드 정의 (위험 점수 범위 → 모드)
+ACTION_MODES = {
+    "hold": {
+        "name": "관망",
+        "min_score": 6,
+        "emoji": "🔴",
+        "description": "불확실성이 높아 신규 진입을 자제하는 구간",
+        "budget_ratio": (0, 10),
+        "guide": "신규 매수 보류 / 기존 보유 유지 / 현금 비중 확대",
+    },
+    "conservative_dca": {
+        "name": "보수적 분할매수",
+        "min_score": 4,
+        "emoji": "🟠",
+        "description": "소액만 천천히 진입하는 구간",
+        "budget_ratio": (10, 25),
+        "guide": "투자예산의 10~25%만 소액 분할 진입",
+    },
+    "normal_dca": {
+        "name": "일반 분할매수",
+        "min_score": 2,
+        "emoji": "🟡",
+        "description": "시장 스트레스가 완화되어 점진적 진입 가능",
+        "budget_ratio": (25, 50),
+        "guide": "투자예산의 25~50% 분할 집행",
+    },
+    "rebalance": {
+        "name": "리밸런싱",
+        "min_score": None,  # 특수 조건으로 판단
+        "emoji": "🔵",
+        "description": "과열/왜곡 섹터 비중 조정 구간",
+        "budget_ratio": (20, 40),
+        "guide": "과열 섹터 축소 / 소외 섹터 분할 진입",
+    },
+    "aggressive": {
+        "name": "적극 진입",
+        "min_score": None,  # 위험 점수 1 이하 + 완화 시나리오
+        "emoji": "🟢",
+        "description": "변동성 안정 + 완화 신호로 적극 진입 가능",
+        "budget_ratio": (50, 80),
+        "guide": "분할 규칙 유지하되 투자예산의 50~80% 집행 가능",
+    },
+}
+
+# 행동 모드 쿨다운 (같은 모드 유지 최소 시간)
+ACTION_COOLDOWN_HOURS = 6
+
+# 예산 배분: 투자 성향별 비율 조정 계수
+BUDGET_PROFILE_MULTIPLIER = {
+    "conservative": 0.7,   # 보수: 기본 비율의 70%
+    "neutral": 1.0,        # 중립: 기본 비율 그대로
+    "aggressive": 1.3,     # 공격: 기본 비율의 130%
 }
 
 # ── 텔레그램 메시지 제한 ──────────────────────────────────

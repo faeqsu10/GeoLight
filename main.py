@@ -31,8 +31,8 @@ def job_collect_news():
     """뉴스 수집 + 이벤트 분류 + DB 저장."""
     try:
         from data.news_collector import collect_all_news
-        from domain.event_classifier import classify_news
-        from domain.sector_mapper import translate_news_to_sectors, format_sector_summary
+        from domain.event_classifier import classify_by_keywords
+        from domain.sector_mapper import translate_news_to_sectors
         from storage.db import insert_news, insert_event
 
         logger.info("=== 뉴스 수집 시작 ===")
@@ -52,8 +52,9 @@ def job_collect_news():
                 continue
             new_count += 1
 
-            # 이벤트 분류
-            events = classify_news(art["title"], art.get("summary", ""))
+            # 이벤트 분류 — 키워드 매칭만 (LLM 호출 안 함 = 빠름)
+            text = f"{art['title']} {art.get('summary', '')}"
+            events = classify_by_keywords(text)
             if events:
                 top_event = events[0]
                 mappings = translate_news_to_sectors([top_event])
@@ -164,11 +165,7 @@ def run_scheduler():
     """스케줄러 실행 (봇과 별도 스레드)."""
     logger.info("스케줄러 등록 중...")
 
-    # 즉시 1회 실행
-    job_collect_news()
-    job_check_prices()
-    job_update_scenarios()
-
+    # 스케줄 먼저 등록 (봇이 즉시 응답할 수 있도록)
     # 스케줄 등록
     schedule.every(NEWS_INTERVAL_MIN).minutes.do(job_collect_news)
     schedule.every(PRICE_INTERVAL_MIN).minutes.do(job_check_prices)
@@ -178,7 +175,14 @@ def run_scheduler():
     for job in schedule.get_jobs():
         logger.info("  %s", job)
 
-    logger.info("스케줄러 시작")
+    logger.info("스케줄러 시작 — 초기 수집 실행")
+
+    # 즉시 1회 실행 (스케줄 등록 후에 실행하여 봇이 먼저 준비됨)
+    job_check_prices()
+    job_update_scenarios()
+    job_collect_news()  # 가장 느린 작업은 마지막
+
+    logger.info("초기 수집 완료 — 주기적 실행 시작")
     while True:
         schedule.run_pending()
         time.sleep(30)
