@@ -1,0 +1,17 @@
+[Unit]
+Description=GeoLight Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/faeqsu10/projects/geolight
+ExecStart=/home/faeqsu10/projects/geolight/scripts/run_geolight.sh
+Restart=always
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=20
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
