@@ -62,11 +62,33 @@ def fetch_price(indicator: str) -> Optional[dict]:
 
 
 def fetch_all_prices() -> dict[str, dict]:
-    """모든 지표의 가격을 한 번에 조회."""
+    """모든 지표의 가격을 병렬로 조회."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     results = {}
-    for indicator in INDICATORS:
-        price = fetch_price(indicator)
-        if price:
-            results[indicator] = price
-        time.sleep(0.3)
+    indicators = list(INDICATORS.keys())
+
+    # 캐시된 것은 바로 반환, 나머지만 병렬 요청
+    to_fetch = []
+    for ind in indicators:
+        cached = _get_cached(ind)
+        if cached:
+            results[ind] = cached
+        else:
+            to_fetch.append(ind)
+
+    if not to_fetch:
+        return results
+
+    with ThreadPoolExecutor(max_workers=len(to_fetch)) as executor:
+        futures = {executor.submit(fetch_price, ind): ind for ind in to_fetch}
+        for future in as_completed(futures):
+            ind = futures[future]
+            try:
+                price = future.result()
+                if price:
+                    results[ind] = price
+            except Exception as e:
+                logger.warning("병렬 가격 조회 실패 [%s]: %s", ind, e)
+
     return results

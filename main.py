@@ -113,6 +113,62 @@ def job_update_scenarios():
         logger.error("시나리오 업데이트 실패: %s", e, exc_info=True)
 
 
+def job_morning_briefing():
+    """조간 브리핑 — 매일 08:30 자동 발송."""
+    try:
+        from data.price_fetcher import fetch_all_prices
+        from domain.scenario_engine import find_best_scenario
+        from domain.action_engine import get_action_result, format_action_card
+        from domain.budget_allocator import calculate_budget
+        from storage.db import get_recent_events
+        from config import INDICATOR_DISPLAY_NAMES
+
+        logger.info("=== 조간 브리핑 생성 ===")
+
+        prices = fetch_all_prices()
+        if not prices:
+            logger.warning("조간 브리핑: 가격 데이터 없음")
+            return
+
+        indicators = {}
+        for ind, p in prices.items():
+            indicators[f"{ind}_change_pct"] = p["change_pct"]
+            indicators[ind] = p["value"]
+
+        scenario = find_best_scenario(indicators)
+        events = get_recent_events(limit=20)
+        result = get_action_result(indicators, scenario, events)
+
+        budget = calculate_budget(
+            action_mode=result["mode_key"],
+            monthly_budget=0,
+            risk_profile="neutral",
+        )
+
+        lines = [
+            f"GeoLight 조간 브리핑 — {datetime.now().strftime('%m/%d %H:%M')}",
+            "",
+        ]
+
+        # 핵심 지표
+        lines.append("주요 지표")
+        lines.append("-" * 25)
+        for ind, p in prices.items():
+            name = INDICATOR_DISPLAY_NAMES.get(ind, ind)
+            lines.append(f"  {name}: {p['value']:,.2f} ({p['change_pct']:+.2f}%)")
+        lines.append("")
+
+        # 행동 카드
+        lines.append(format_action_card(result, budget))
+
+        text = "\n".join(lines)
+        _send_alert_sync_simple(text)
+        logger.info("조간 브리핑 발송 완료")
+
+    except Exception as e:
+        logger.error("조간 브리핑 실패: %s", e, exc_info=True)
+
+
 def job_healthcheck():
     """헬스체크 — 매일 09:00."""
     try:
@@ -170,6 +226,7 @@ def run_scheduler():
     schedule.every(NEWS_INTERVAL_MIN).minutes.do(job_collect_news)
     schedule.every(PRICE_INTERVAL_MIN).minutes.do(job_check_prices)
     schedule.every(SCENARIO_INTERVAL_MIN).minutes.do(job_update_scenarios)
+    schedule.every().day.at("08:30").do(job_morning_briefing)
     schedule.every().day.at("09:00").do(job_healthcheck)
 
     for job in schedule.get_jobs():
