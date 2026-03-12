@@ -13,12 +13,19 @@
 - [x] 텔레그램 봇 명령 세트
 - [x] AI 시장 분석 `/ask`
 - [x] 핵심 회귀 테스트 추가
+- [x] UX 개선 — format_action_card, format_budget_card 전면 재작성
+- [x] Config 중앙화 — ACTION_MODE_FLOW, ACTION_URGENT_RULES 등
+- [x] 텔레그램 헬퍼 함수 추가 + 에러 메시지 통일
+- [x] 포지션 추적 시스템 (`/portfolio` 명령)
 
-## 다음 우선순위
+## 다음 우선순위 (Phase 4)
+- [ ] 조간 브리핑 자동 발송 (08:30)
+- [ ] fetch_all_prices 병렬화 (1.5초→0.5초)
+- [ ] 시나리오 엔진 강화 (절대 수준 조건 + 섹터 모멘텀)
 - [ ] 텔레그램 명령 end-to-end 테스트 보강
 - [ ] 웹 대시보드
-- [ ] DB/로그 기반 운영 점검 스크립트
-- [ ] 데이터 품질 모니터링 (중복 뉴스, 오분류, API 실패율)
 
 ## Backlog
+- [ ] DB/로그 기반 운영 점검 스크립트
+- [ ] 데이터 품질 모니터링 (중복 뉴스, 오분류, API 실패율)
 - [ ] Signalight 연동 (종목 시그널 교차 참조)

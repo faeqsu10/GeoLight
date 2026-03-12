@@ -43,7 +43,31 @@
 | 27 | DB 마이그레이션 | 완료 | 2026-03-11 | ALTER TABLE로 monthly_income, fixed_expenses 컬럼 추가 |
 | 28 | 아키텍트 리뷰 반영 | 완료 | 2026-03-11 | 이중 multiplier 방지, 파싱 edge case, 음수 가용자금 처리 |
 
+## Phase 3.5: UX 전면 개선 + Config 중앙화 (2026-03-12 세션)
+
+| # | 항목 | 상태 | 날짜 | 비고 |
+|---|------|------|------|------|
+| 29 | format_action_card 전면 재작성 | 완료 | 2026-03-12 | 시나리오 설명, 할 것/피할 것/줄일 때 구조 |
+| 30 | format_budget_card 전면 재작성 | 완료 | 2026-03-12 | 한줄 요약, 섹터별 실행안, 회수 기준 |
+| 31 | Config 중앙화 | 완료 | 2026-03-12 | ACTION_MODE_FLOW, ACTION_URGENT_RULES, ACTION_EVENT_BUCKETS, INDICATOR_DISPLAY_NAMES, PROFILE_NAMES |
+| 32 | 텔레그램 헬퍼 함수 | 완료 | 2026-03-12 | _format_sector_line, _format_event_brief, _command_error_message, _data_unavailable_message |
+| 33 | 회귀 테스트 4파일 22개 | 완료 | 2026-03-12 | test_scenario_action, test_formatters, test_telegram_bot, test_ai_assistant |
+
+## Phase 4: 포지션 추적 + 확장
+
+| # | 항목 | 상태 | 날짜 | 비고 |
+|---|------|------|------|------|
+| 34 | positions 테이블 + CRUD | 완료 | 2026-03-12 | DB UPSERT, 종목명/코드 검색, 삭제 |
+| 35 | domain/portfolio.py | 완료 | 2026-03-12 | 포지션 추가/삭제, 섹터 자동매칭, 시나리오 교차분석 |
+| 36 | /portfolio 텔레그램 명령 | 완료 | 2026-03-12 | 추가/수정/삭제/조회, 섹터별 비중 |
+| 37 | /action 포트폴리오 연동 | 완료 | 2026-03-12 | 보유 종목 vs 시나리오 수혜/위험 분석 |
+| 38 | 포트폴리오 테스트 13개 | 완료 | 2026-03-12 | test_portfolio.py |
+| 39 | 조간 브리핑 자동 발송 | 예정 | - | 08:30 자동 푸시 |
+| 40 | fetch_all_prices 병렬화 | 예정 | - | ThreadPoolExecutor, 1.5초→0.5초 |
+| 41 | 시나리오 엔진 강화 | 예정 | - | 절대 수준 조건 + 섹터 모멘텀 |
+
 ### 통계
-- 총 항목: 28
-- 완료: 28
-- 코드: 약 2,500줄 (Python)
+- 총 항목: 41
+- 완료: 38
+- 코드: 약 4,500줄 (Python)
+- 테스트: 35개 (5파일)

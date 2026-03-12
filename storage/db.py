@@ -88,6 +88,21 @@ def init_db():
                 created_at TEXT DEFAULT (datetime('now', 'localtime'))
             );
             CREATE INDEX IF NOT EXISTS idx_action_created ON action_history(created_at);
+
+            CREATE TABLE IF NOT EXISTS positions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                telegram_user_id INTEGER NOT NULL,
+                stock_code TEXT NOT NULL,
+                stock_name TEXT NOT NULL,
+                avg_price INTEGER NOT NULL,
+                quantity INTEGER NOT NULL,
+                sector TEXT DEFAULT '',
+                memo TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+                UNIQUE(telegram_user_id, stock_code)
+            );
+            CREATE INDEX IF NOT EXISTS idx_positions_user ON positions(telegram_user_id);
         """)
         conn.commit()
 
@@ -294,6 +309,75 @@ def insert_action_history(action_mode: str, scenario_name: str,
     finally:
         conn.close()
 
+
+# ── 포지션 (보유 종목) ─────────────────────────────────
+
+def upsert_position(telegram_user_id: int, stock_code: str,
+                    stock_name: str, avg_price: int, quantity: int,
+                    sector: str = "", memo: str = "") -> None:
+    """포지션 추가/갱신. 같은 종목이면 UPDATE."""
+    conn = _connect()
+    try:
+        conn.execute(
+            "INSERT INTO positions "
+            "(telegram_user_id, stock_code, stock_name, avg_price, quantity, sector, memo) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(telegram_user_id, stock_code) DO UPDATE SET "
+            "stock_name = excluded.stock_name, "
+            "avg_price = excluded.avg_price, "
+            "quantity = excluded.quantity, "
+            "sector = excluded.sector, "
+            "memo = excluded.memo, "
+            "updated_at = datetime('now', 'localtime')",
+            (telegram_user_id, stock_code, stock_name, avg_price, quantity,
+             sector, memo),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_position(telegram_user_id: int, stock_code: str) -> bool:
+    """포지션 삭제. 삭제 성공 시 True."""
+    conn = _connect()
+    try:
+        cur = conn.execute(
+            "DELETE FROM positions WHERE telegram_user_id = ? AND stock_code = ?",
+            (telegram_user_id, stock_code),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_positions(telegram_user_id: int) -> list[dict]:
+    """사용자의 전체 포지션 조회."""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM positions WHERE telegram_user_id = ? ORDER BY updated_at DESC",
+            (telegram_user_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_position_by_name(telegram_user_id: int, stock_name: str) -> Optional[dict]:
+    """종목명으로 포지션 검색 (부분 일치)."""
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT * FROM positions WHERE telegram_user_id = ? AND stock_name LIKE ?",
+            (telegram_user_id, f"%{stock_name}%"),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ── 행동 이력 ─────────────────────────────────────────────
 
 def get_last_action() -> Optional[dict]:
     conn = _connect()

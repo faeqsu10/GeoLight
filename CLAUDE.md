@@ -30,7 +30,8 @@ geolight/
 │   ├── event_classifier.py    # 이벤트 분류 (지정학, 유가, 환율, 금리)
 │   ├── sector_mapper.py       # 이벤트 → 한국 섹터 매핑
 │   ├── scenario_engine.py     # 시나리오 기반 투자 지도
-│   └── trend_detector.py      # 관심 급증 종목 탐색
+│   ├── trend_detector.py      # 관심 급증 종목 탐색
+│   └── portfolio.py           # 보유 종목(포지션) 관리 + 시나리오 연동
 ├── storage/               # 영속성 레이어
 │   └── db.py              # SQLite (이벤트 이력, 매핑 사전)
 ├── infra/                 # 인프라

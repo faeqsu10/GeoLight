@@ -32,6 +32,14 @@ from domain.threshold_monitor import check_all_thresholds
 from domain.trend_detector import detect_hot_stocks, format_hot_stocks
 from domain.action_engine import get_action_result, format_action_card
 from domain.budget_allocator import calculate_budget, calculate_investable_amount, format_budget_card
+from domain.portfolio import (
+    add_position,
+    remove_position,
+    format_portfolio,
+    analyze_portfolio_vs_scenario,
+    format_portfolio_action_advice,
+    get_user_positions,
+)
 from domain.user_profile import get_profile, update_profile, format_profile
 from storage.db import get_recent_events
 
@@ -338,6 +346,10 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "오늘 행동 정하기\n"
         "- /action  오늘 매수/관망 판단\n"
         "- /budget  이번 달 예산 실행안\n\n"
+        "내 포트폴리오\n"
+        "- /portfolio  보유 종목 목록\n"
+        "- /portfolio 삼성전자 70000 10  종목 추가\n"
+        "- /portfolio 삭제 삼성전자  종목 삭제\n\n"
         "내 설정\n"
         "- /profile  현재 설정 보기\n"
         "- /profile 공격 200만\n"
@@ -403,6 +415,20 @@ async def cmd_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             risk_profile=profile.get("risk_profile", "neutral"),
         )
         text = format_action_card(result, budget)
+
+        # 포트폴리오 보유 시 맞춤 조언 추가
+        positions = get_user_positions(user_id)
+        if positions and result.get("focus_sectors"):
+            beneficiary = scenario.get("beneficiary_sectors", []) if scenario else []
+            damaged = scenario.get("damaged_sectors", []) if scenario else []
+            if beneficiary or damaged:
+                analysis = analyze_portfolio_vs_scenario(
+                    user_id, beneficiary, damaged,
+                )
+                advice = format_portfolio_action_advice(analysis, result["mode_key"])
+                if advice.strip():
+                    text += "\n\n" + advice
+
         await _send_message(update.effective_chat.id, text, context)
 
     except Exception as e:
@@ -564,6 +590,91 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """보유 종목 관리."""
+    user_id = update.effective_user.id
+    args = context.args or []
+
+    if not args:
+        # 인자 없으면 포트폴리오 표시
+        text = format_portfolio(user_id)
+        await _send_message(update.effective_chat.id, text, context)
+        return
+
+    # /portfolio 삭제 종목명
+    if args[0] in ("삭제", "제거", "del", "remove"):
+        if len(args) < 2:
+            await update.message.reply_text(
+                "삭제할 종목명을 입력해주세요.\n예: /portfolio 삭제 삼성전자"
+            )
+            return
+        stock_name = " ".join(args[1:])
+        if remove_position(user_id, stock_name):
+            await update.message.reply_text(f"{stock_name} 포지션을 삭제했습니다.")
+        else:
+            await update.message.reply_text(
+                f"'{stock_name}'에 해당하는 보유 종목을 찾지 못했습니다.\n"
+                "/portfolio 로 보유 목록을 확인해주세요."
+            )
+        return
+
+    # /portfolio 종목명 평단가 수량 [메모]
+    if len(args) < 3:
+        await update.message.reply_text(
+            "종목 추가 형식: /portfolio 종목명 평단가 수량\n\n"
+            "예시\n"
+            "-" * 25 + "\n"
+            "/portfolio 삼성전자 70000 10\n"
+            "/portfolio 현대차 200000 5\n"
+            "/portfolio 삭제 삼성전자"
+        )
+        return
+
+    stock_name = args[0]
+
+    # 평단가 파싱
+    avg_price = _parse_amount(args[1])
+    if avg_price is None:
+        # _parse_amount는 10만 미만을 거부하므로 직접 파싱
+        try:
+            avg_price = int(args[1])
+            if avg_price <= 0:
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                f"평단가 '{args[1]}'를 인식하지 못했습니다.\n숫자로 입력해주세요. 예: 70000"
+            )
+            return
+
+    # 수량 파싱
+    try:
+        quantity = int(args[2])
+        if quantity <= 0:
+            raise ValueError
+    except ValueError:
+        await update.message.reply_text(
+            f"수량 '{args[2]}'를 인식하지 못했습니다.\n양의 정수로 입력해주세요. 예: 10"
+        )
+        return
+
+    memo = " ".join(args[3:]) if len(args) > 3 else ""
+
+    try:
+        result = add_position(user_id, stock_name, avg_price, quantity, memo)
+        sector_info = f" [{result['sector']}]" if result["sector"] else ""
+        text = (
+            f"{result['stock_name']}{sector_info} 포지션 저장 완료\n"
+            f"  {quantity}주 × {avg_price:,}원 = {result['total']:,}원\n\n"
+            "/portfolio 로 전체 보유 목록을 확인할 수 있습니다."
+        )
+        await update.message.reply_text(text)
+    except Exception as e:
+        logger.error("/portfolio 추가 실패: %s", e, exc_info=True)
+        await update.message.reply_text(
+            _command_error_message("/portfolio", "종목을 저장하는 중 문제가 발생했습니다.")
+        )
+
+
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """AI에게 시장 분석 질문."""
     global _ai
@@ -620,6 +731,7 @@ def create_bot_app() -> Optional[Application]:
     _app.add_handler(CommandHandler("action", cmd_action))
     _app.add_handler(CommandHandler("budget", cmd_budget))
     _app.add_handler(CommandHandler("profile", cmd_profile))
+    _app.add_handler(CommandHandler("portfolio", cmd_portfolio))
     _app.add_handler(CommandHandler("ask", cmd_ask))
     _app.add_handler(CommandHandler("help", cmd_help))
 
