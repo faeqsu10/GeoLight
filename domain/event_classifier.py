@@ -60,14 +60,13 @@ def classify_by_keywords(text: str) -> list[dict]:
 
 
 def classify_by_llm(text: str) -> Optional[list[dict]]:
-    """Gemini API로 이벤트 분류 (선택적 기능)."""
+    """Gemini REST API로 이벤트 분류 (선택적 기능)."""
     if not GEMINI_API_KEY:
         return None
 
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        import requests
+        from config import GEMINI_MODEL
 
         prompt = f"""다음 뉴스 텍스트를 분석하여 이벤트 유형을 분류하세요.
 
@@ -81,8 +80,30 @@ def classify_by_llm(text: str) -> Optional[list[dict]]:
 
 최대 3개까지만 반환하세요. 해당 없으면 빈 배열 []을 반환하세요."""
 
-        response = model.generate_content(prompt)
-        raw = response.text.strip()
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+        resp = requests.post(
+            url,
+            params={"key": GEMINI_API_KEY},
+            json={
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.3},
+            },
+            timeout=15,
+        )
+
+        if resp.status_code != 200:
+            logger.warning("Gemini API 오류: %d", resp.status_code)
+            return None
+
+        candidates = resp.json().get("candidates", [])
+        if not candidates:
+            return None
+
+        raw = candidates[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+        if not raw:
+            return None
+
+        raw = raw.strip()
 
         # 마크다운 코드블록 제거
         if raw.startswith("```"):

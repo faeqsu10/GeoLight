@@ -384,7 +384,11 @@ SCENARIOS = {
             "휴전, 협상 진전, 긴장 완화 뉴스가 나오면 확전 수혜 포지션은 분할로 정리합니다.",
             "단기 급등으로 수익이 난 종목은 한 번에 다 팔지 말고 2~3회로 나눠 익절합니다.",
         ],
-        "indicators": {"oil_change_pct": (5.0, None), "vix": (25.0, None)},
+        "indicators": {
+            "oil_change_pct": (5.0, None),
+            "vix": (25.0, None),
+            "oil_wti": (85.0, None),       # 절대 수준: 유가 고수준 확인
+        },
         "beneficiary_sectors": ["방산", "LNG", "에너지", "정유", "금"],
         "damaged_sectors": ["항공", "여행", "소비", "성장주"],
     },
@@ -410,7 +414,11 @@ SCENARIOS = {
             "환율 불안이 계속되면 반등 기대 포지션을 더 늘리지 말고 비중을 줄입니다.",
             "반등 없이 추가 하락이 이어지면 손절 기준을 미리 정한 범위에서 실행합니다.",
         ],
-        "indicators": {"kospi_change_pct": (None, -3.0), "usd_krw_change_pct": (1.5, None)},
+        "indicators": {
+            "kospi_change_pct": (None, -3.0),
+            "usd_krw_change_pct": (1.5, None),
+            "vix": (28.0, None),            # 절대 수준: 공포 확인
+        },
         "beneficiary_sectors": ["반도체", "자동차", "은행"],
         "damaged_sectors": ["소형주", "바이오", "성장주"],
     },
@@ -423,7 +431,11 @@ SCENARIOS = {
             "달러 강세가 꺾이면 수출·금융 수혜 논리가 약해질 수 있어 일부 회수합니다.",
             "실적 확인 없이 밸류만 급하게 오른 종목은 비중을 줄여 수익을 확정합니다.",
         ],
-        "indicators": {"vix": (None, 25.0), "usd_krw_change_pct": (1.0, None)},
+        "indicators": {
+            "vix": (None, 25.0),
+            "usd_krw_change_pct": (1.0, None),
+            "usd_krw": (1350.0, None),     # 절대 수준: 원화 약세 확인
+        },
         "beneficiary_sectors": ["은행", "보험", "수출주"],
         "damaged_sectors": ["성장주", "부동산", "리츠"],
     },

@@ -5,4 +5,3 @@ yfinance==1.2.0
 pykrx==1.2.4
 python-telegram-bot==22.6
 schedule==1.2.2
-google-generativeai==0.8.6

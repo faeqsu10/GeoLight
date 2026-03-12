@@ -63,7 +63,7 @@ geolight/
 - `requests` — HTTP 클라이언트 (뉴스/가격 API)
 - `schedule` — 스케줄링
 - `python-telegram-bot` — 텔레그램 봇
-- `google-generativeai` — Gemini API (뉴스 요약/분류)
+- Gemini REST API — 뉴스 분류/AI 질답 (직접 HTTP 호출)
 - `sqlite3` — 내장 DB
 
 ### 프론트엔드 (Phase 2)

@@ -23,6 +23,7 @@ class ScenarioActionRegressionTests(unittest.TestCase):
             "oil_wti_change_pct": 6.2,
             "oil_brent_change_pct": 5.8,
             "vix": 27.0,
+            "oil_wti": 90.0,  # 절대 수준 조건
         }
 
         best = find_best_scenario(indicators)
