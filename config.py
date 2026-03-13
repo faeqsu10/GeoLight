@@ -13,6 +13,13 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+# 텔레그램 봇 접근 허용 사용자 (쉼표 구분, 비어있으면 제한 없음)
+_raw_allowed = os.getenv("TELEGRAM_ALLOWED_USERS", "")
+TELEGRAM_ALLOWED_USERS: set[int] = {
+    int(uid.strip()) for uid in _raw_allowed.split(",")
+    if uid.strip().isdigit()
+}
+
 if not TELEGRAM_BOT_TOKEN:
     logger.warning("TELEGRAM_BOT_TOKEN 미설정. 텔레그램 기능 비활성화.")
 if not TELEGRAM_CHAT_ID:

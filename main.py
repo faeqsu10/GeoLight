@@ -2,7 +2,6 @@
 
 import sys
 import os
-import asyncio
 import logging
 import time
 from datetime import datetime
@@ -96,14 +95,11 @@ def job_check_prices():
 def job_update_scenarios():
     """시나리오 상태 업데이트."""
     try:
-        from data.price_fetcher import fetch_all_prices
+        from data.price_fetcher import build_indicators, fetch_all_prices
         from domain.scenario_engine import find_best_scenario
 
         prices = fetch_all_prices()
-        indicators = {}
-        for ind, p in prices.items():
-            indicators[f"{ind}_change_pct"] = p["change_pct"]
-            indicators[ind] = p["value"]
+        indicators = build_indicators(prices)
 
         best = find_best_scenario(indicators)
         if best and best["score"] > 0.5:
@@ -116,7 +112,7 @@ def job_update_scenarios():
 def job_morning_briefing():
     """조간 브리핑 — 매일 08:30 자동 발송."""
     try:
-        from data.price_fetcher import fetch_all_prices
+        from data.price_fetcher import fetch_all_prices, build_indicators
         from domain.scenario_engine import find_best_scenario
         from domain.action_engine import get_action_result, format_action_card
         from domain.budget_allocator import calculate_budget
@@ -130,10 +126,7 @@ def job_morning_briefing():
             logger.warning("조간 브리핑: 가격 데이터 없음")
             return
 
-        indicators = {}
-        for ind, p in prices.items():
-            indicators[f"{ind}_change_pct"] = p["change_pct"]
-            indicators[ind] = p["value"]
+        indicators = build_indicators(prices)
 
         scenario = find_best_scenario(indicators)
         events = get_recent_events(limit=20)

@@ -61,6 +61,15 @@ def fetch_price(indicator: str) -> Optional[dict]:
         return None
 
 
+def build_indicators(prices: dict) -> dict:
+    """가격 데이터를 시나리오/액션 엔진용 indicators dict로 변환."""
+    indicators = {}
+    for ind, p in prices.items():
+        indicators[f"{ind}_change_pct"] = p["change_pct"]
+        indicators[ind] = p["value"]
+    return indicators
+
+
 def fetch_all_prices() -> dict[str, dict]:
     """모든 지표의 가격을 병렬로 조회."""
     from concurrent.futures import ThreadPoolExecutor, as_completed

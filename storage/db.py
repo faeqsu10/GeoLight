@@ -13,7 +13,6 @@ logger = logging.getLogger("geolight.storage")
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
 
@@ -21,6 +20,7 @@ def init_db():
     """테이블 생성 (멱등)."""
     conn = _connect()
     try:
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS news (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -133,13 +133,13 @@ def insert_news(source: str, title: str, url: str,
     """뉴스 삽입. 중복(url) 시 무시. 성공 시 True."""
     conn = _connect()
     try:
-        conn.execute(
+        cur = conn.execute(
             "INSERT OR IGNORE INTO news (source, title, url, summary, published_at, event_type) "
             "VALUES (?, ?, ?, ?, ?, ?)",
             (source, title, url, summary, published_at, event_type),
         )
         conn.commit()
-        return conn.total_changes > 0
+        return cur.rowcount > 0
     finally:
         conn.close()
 
@@ -364,13 +364,20 @@ def get_positions(telegram_user_id: int) -> list[dict]:
         conn.close()
 
 
+def _escape_like(value: str) -> str:
+    """SQL LIKE 메타문자 이스케이프."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def get_position_by_name(telegram_user_id: int, stock_name: str) -> Optional[dict]:
     """종목명으로 포지션 검색 (부분 일치)."""
     conn = _connect()
     try:
+        escaped = _escape_like(stock_name)
         row = conn.execute(
-            "SELECT * FROM positions WHERE telegram_user_id = ? AND stock_name LIKE ?",
-            (telegram_user_id, f"%{stock_name}%"),
+            "SELECT * FROM positions WHERE telegram_user_id = ? "
+            "AND stock_name LIKE ? ESCAPE '\\'",
+            (telegram_user_id, f"%{escaped}%"),
         ).fetchone()
         return dict(row) if row else None
     finally:

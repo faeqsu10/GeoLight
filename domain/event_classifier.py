@@ -83,7 +83,7 @@ def classify_by_llm(text: str) -> Optional[list[dict]]:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
         resp = requests.post(
             url,
-            params={"key": GEMINI_API_KEY},
+            headers={"x-goog-api-key": GEMINI_API_KEY},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"maxOutputTokens": 1024, "temperature": 0.3},

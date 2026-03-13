@@ -208,15 +208,19 @@ def get_action_result(
             logger.info("오늘의 가이드 캐시 반환 (급변 없음)")
             return _today_result
 
+        # lock 내에서 이전 판정 복사 (race condition 방지)
+        prev_action = _last_action.copy() if _last_action else None
+        prev_action_time = _last_action_time
+
     risk_score, risk_reasons, opp_reasons = calculate_risk_score(
         indicators, scenario, events
     )
     mode_key = determine_action_mode(risk_score, scenario)
 
-    # 쿨다운: 이전 판정과 비교하여 급격한 변동 억제
+    # 쿨다운: 이전 판정과 비교하여 급격한 변동 억제 (로컬 복사본 사용)
     now = time.time()
-    if _last_action and (now - _last_action_time) < ACTION_COOLDOWN_HOURS * 3600:
-        prev_key = _last_action.get("mode_key")
+    if prev_action and (now - prev_action_time) < ACTION_COOLDOWN_HOURS * 3600:
+        prev_key = prev_action.get("mode_key")
         if prev_key and prev_key != mode_key:
             # 2단계 이상 점프 방지
             if prev_key in ACTION_MODE_FLOW and mode_key in ACTION_MODE_FLOW:
@@ -228,7 +232,7 @@ def get_action_result(
                     original_mode = ACTION_MODES.get(mode_key, {}).get("name", mode_key)
                     mode_key = ACTION_MODE_FLOW[mid_idx]
                     risk_reasons.append(
-                        f"모드 전환 조정: {_last_action['mode']['name']}→{original_mode} "
+                        f"모드 전환 조정: {prev_action['mode']['name']}→{original_mode} "
                         f"요청이나, 1단계씩 이동"
                     )
 
@@ -271,7 +275,7 @@ def get_action_result(
         _today_result = result
         _today_date = today
 
-    # DB 기록
+    # DB 기록 (lock 밖에서 — fire-and-forget)
     try:
         from storage.db import insert_action_history
         insert_action_history(

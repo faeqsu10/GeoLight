@@ -12,12 +12,13 @@ from telegram.ext import (
 
 from config import (
     INDICATOR_DISPLAY_NAMES,
+    TELEGRAM_ALLOWED_USERS,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_CHAT_ID,
     TELEGRAM_MAX_LENGTH,
 )
 from data.news_collector import collect_all_news
-from data.price_fetcher import fetch_all_prices
+from data.price_fetcher import build_indicators, fetch_all_prices
 from domain.ai_assistant import AIAssistant, build_market_context, markdown_to_telegram_html
 import re
 
@@ -49,26 +50,43 @@ _app: Optional[Application] = None
 _ai: Optional[AIAssistant] = None
 
 
+# ── 인증 ─────────────────────────────────────────────────
+
+def _authorized(func):
+    """텔레그램 봇 접근 제어 데코레이터."""
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        if TELEGRAM_ALLOWED_USERS and update.effective_user.id not in TELEGRAM_ALLOWED_USERS:
+            logger.warning("미허가 접근: user_id=%d", update.effective_user.id)
+            await update.message.reply_text("접근 권한이 없습니다.")
+            return
+        return await func(update, context)
+    wrapper.__name__ = func.__name__
+    return wrapper
+
+
 # ── 메시지 분할 전송 ──────────────────────────────────────
 
-async def _send_message(chat_id: str, text: str, context: ContextTypes.DEFAULT_TYPE):
-    """4096자 제한 대응 분할 전송."""
-    if len(text) <= TELEGRAM_MAX_LENGTH:
-        await context.bot.send_message(chat_id=chat_id, text=text)
-        return
-
-    # 줄 단위 분할
-    lines = text.split("\n")
+def _split_text(text: str, max_length: int = TELEGRAM_MAX_LENGTH) -> list[str]:
+    """긴 텍스트를 줄 단위로 분할."""
+    if len(text) <= max_length:
+        return [text]
+    chunks = []
     chunk = ""
-    for line in lines:
-        if len(chunk) + len(line) + 1 > TELEGRAM_MAX_LENGTH:
+    for line in text.split("\n"):
+        if len(chunk) + len(line) + 1 > max_length:
             if chunk:
-                await context.bot.send_message(chat_id=chat_id, text=chunk)
+                chunks.append(chunk)
             chunk = line
         else:
             chunk = f"{chunk}\n{line}" if chunk else line
-
     if chunk:
+        chunks.append(chunk)
+    return chunks
+
+
+async def _send_message(chat_id: str, text: str, context: ContextTypes.DEFAULT_TYPE):
+    """4096자 제한 대응 분할 전송."""
+    for chunk in _split_text(text):
         await context.bot.send_message(chat_id=chat_id, text=chunk)
 
 
@@ -109,20 +127,8 @@ async def send_alert(text: str):
         return
 
     try:
-        if len(text) <= TELEGRAM_MAX_LENGTH:
-            await _app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=text)
-        else:
-            lines = text.split("\n")
-            chunk = ""
-            for line in lines:
-                if len(chunk) + len(line) + 1 > TELEGRAM_MAX_LENGTH:
-                    if chunk:
-                        await _app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk)
-                    chunk = line
-                else:
-                    chunk = f"{chunk}\n{line}" if chunk else line
-            if chunk:
-                await _app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk)
+        for chunk in _split_text(text):
+            await _app.bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=chunk)
     except Exception as e:
         logger.warning("텔레그램 알림 발송 실패: %s", e)
 
@@ -144,6 +150,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(text)
 
 
+@_authorized
 async def cmd_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """현재 주요 이벤트 + 영향 섹터 요약.
 
@@ -253,6 +260,7 @@ async def cmd_now(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+@_authorized
 async def cmd_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """시나리오 투자 지도."""
     try:
@@ -291,6 +299,7 @@ async def cmd_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+@_authorized
 async def cmd_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """알림 상태 확인."""
     from config import THRESHOLDS
@@ -316,6 +325,7 @@ async def cmd_alert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines))
 
 
+@_authorized
 async def cmd_hot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """관심 급증 종목."""
     await update.message.reply_text("종목 데이터 조회 중...")
@@ -376,15 +386,7 @@ def _parse_amount(text: str) -> Optional[int]:
     return None
 
 
-def _build_indicators(prices: dict) -> dict:
-    """가격 데이터를 action_engine용 indicators로 변환."""
-    indicators = {}
-    for ind, p in prices.items():
-        indicators[f"{ind}_change_pct"] = p["change_pct"]
-        indicators[ind] = p["value"]
-    return indicators
-
-
+@_authorized
 async def cmd_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """오늘의 행동 가이드."""
     await update.message.reply_text("행동 모드 분석 중...")
@@ -400,7 +402,7 @@ async def cmd_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        indicators = _build_indicators(prices)
+        indicators = build_indicators(prices)
         scenario = find_best_scenario(indicators)
         events = get_recent_events(limit=20)
 
@@ -441,6 +443,7 @@ async def cmd_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+@_authorized
 async def cmd_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """예산 집행 가이드."""
     try:
@@ -454,7 +457,7 @@ async def cmd_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        indicators = _build_indicators(prices)
+        indicators = build_indicators(prices)
         scenario = find_best_scenario(indicators)
         events = get_recent_events(limit=20)
 
@@ -502,6 +505,7 @@ async def cmd_budget(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+@_authorized
 async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """내 투자 설정 조회/변경."""
     user_id = update.effective_user.id
@@ -590,6 +594,7 @@ async def cmd_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+@_authorized
 async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """보유 종목 관리."""
     user_id = update.effective_user.id
@@ -675,6 +680,7 @@ async def cmd_portfolio(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+@_authorized
 async def cmd_ask(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """AI에게 시장 분석 질문."""
     global _ai
