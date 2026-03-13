@@ -54,13 +54,15 @@ _ai: Optional[AIAssistant] = None
 
 def _authorized(func):
     """텔레그램 봇 접근 제어 데코레이터."""
+    import functools
+
+    @functools.wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if TELEGRAM_ALLOWED_USERS and update.effective_user.id not in TELEGRAM_ALLOWED_USERS:
             logger.warning("미허가 접근: user_id=%d", update.effective_user.id)
             await update.message.reply_text("접근 권한이 없습니다.")
             return
         return await func(update, context)
-    wrapper.__name__ = func.__name__
     return wrapper
 
 
@@ -265,10 +267,7 @@ async def cmd_scenario(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """시나리오 투자 지도."""
     try:
         prices = fetch_all_prices()
-        indicators = {}
-        for ind, p in prices.items():
-            indicators[f"{ind}_change_pct"] = p["change_pct"]
-            indicators[ind] = p["value"]
+        indicators = build_indicators(prices)
 
         all_scenarios = get_all_scenarios_status(indicators)
         best = find_best_scenario(indicators)
